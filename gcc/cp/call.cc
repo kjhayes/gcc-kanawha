@@ -13971,11 +13971,6 @@ perform_implicit_conversion_flags (tree type, tree expr,
   conversion *conv;
   location_t loc = cp_expr_loc_or_input_loc (expr);
 
-  if (TYPE_REF_P (type))
-    expr = mark_lvalue_use (expr);
-  else
-    expr = mark_rvalue_use (expr);
-
   if (error_operand_p (expr))
     return error_mark_node;
 
@@ -14902,7 +14897,7 @@ extend_temps_r (tree *tp, int *walk_subtrees, void *data)
 	  {
 	    tree set = build2 (MODIFY_EXPR, boolean_type_node,
 			       cur_cond_guard, boolean_true_node);
-	    op = add_stmt_to_compound (set, op);
+	    op = cp_build_compound_expr (set, op, tf_none);
 	  }
       };
       walk_arm (TREE_OPERAND (*tp, 1));
@@ -14922,10 +14917,13 @@ extend_temps_r (tree *tp, int *walk_subtrees, void *data)
   if (TREE_CODE (*p) == TARGET_EXPR
       /* An eliding TARGET_EXPR isn't a temporary at all.  */
       && !TARGET_EXPR_ELIDING_P (*p)
-      /* A TARGET_EXPR with CLEANUP_EH_ONLY is an artificial variable used
-	 during initialization, and need not be extended.  */
-      && !CLEANUP_EH_ONLY (*p))
+      /* A TARGET_EXPR with TARGET_EXPR_INTERNAL_P is an artificial variable
+	 used during initialization that need not be extended.  */
+      && !TARGET_EXPR_INTERNAL_P (*p))
     {
+      /* A CLEANUP_EH_ONLY expr should also have TARGET_EXPR_INTERNAL_P.  */
+      gcc_checking_assert (!CLEANUP_EH_ONLY (*p));
+
       tree subinit = NULL_TREE;
       tree slot = TARGET_EXPR_SLOT (*p);
       *p = set_up_extended_ref_temp (d->decl, *p, d->cleanups, &subinit,

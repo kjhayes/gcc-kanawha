@@ -57,7 +57,7 @@ import dmd.dsymbolsem : dsymbolSemantic, checkDeprecated, aliasSemantic, search,
 import dmd.errors;
 import dmd.errorsink;
 import dmd.expression;
-import dmd.expressionsem : resolveLoc, expressionSemantic, resolveProperties;
+import dmd.expressionsem : resolveLoc, expressionSemantic, resolveProperties, checkValue;
 import dmd.func;
 import dmd.funcsem : functionSemantic, leastAsSpecialized, overloadApply;
 import dmd.globals;
@@ -217,17 +217,12 @@ Dsymbol getDsymbol(RootObject oarg)
             return te.td;
         if (auto te = ea.isScopeExp())
             return te.sds;
-        else
-            return null;
+        return null;
     }
-    else
-    {
-        // Try to convert Type to symbol
-        if (auto ta = isType(oarg))
-            return ta.toDsymbol(null);
-        else
-            return isDsymbol(oarg); // if already a symbol
-    }
+    // Try to convert Type to symbol
+    if (auto ta = isType(oarg))
+        return ta.toDsymbol(null);
+    return isDsymbol(oarg); // if already a symbol
 }
 
 
@@ -749,14 +744,6 @@ extern (C++) final class TemplateDeclaration : ScopeDsymbol
     override const(char)* kind() const
     {
         return (onemember && onemember.isAggregateDeclaration()) ? onemember.kind() : "template";
-    }
-
-    override const(char)* toChars() const
-    {
-        HdrGenState hgs;
-        OutBuffer buf;
-        toCharsMaybeConstraints(this, buf, hgs);
-        return buf.extractChars();
     }
 
     /****************************
@@ -3835,13 +3822,6 @@ extern (C++) class TemplateInstance : ScopeDsymbol
         return true;
     }
 
-    override const(char)* toChars() const
-    {
-        OutBuffer buf;
-        toCBufferInstance(this, buf);
-        return buf.extractChars();
-    }
-
     override final const(char)* toPrettyCharsHelper()
     {
         OutBuffer buf;
@@ -5529,13 +5509,6 @@ extern (C++) final class TemplateMixin : TemplateInstance
         return members.foreachDsymbol( (s) { return s.hasPointers(); } ) != 0;
     }
 
-    override const(char)* toChars() const
-    {
-        OutBuffer buf;
-        toCBufferInstance(this, buf);
-        return buf.extractChars();
-    }
-
     extern (D) bool findTempDecl(Scope* sc)
     {
         // Follow qualifications to find the TemplateDeclaration
@@ -5752,8 +5725,8 @@ MATCH matchArg(TemplateParameter tp, Loc instLoc, Scope* sc, Objects* tiargs, si
 
     if (auto ttp = tp.isTemplateTupleParameter())
         return matchArgTuple(ttp);
-    else
-        return matchArgParameter();
+
+    return matchArgParameter();
 }
 
 MATCH matchArg(TemplateParameter tp, Scope* sc, RootObject oarg, size_t i, TemplateParameters* parameters, ref Objects dedtypes, Declaration* psparam)
@@ -6221,8 +6194,8 @@ void printTemplateStats(bool listInstances, ErrorSink eSink)
             auto diff = b.ts.uniqueInstantiations - a.ts.uniqueInstantiations;
             if (diff)
                 return diff;
-            else
-                return b.ts.numInstantiations - a.ts.numInstantiations;
+
+            return b.ts.numInstantiations - a.ts.numInstantiations;
         }
     }
 

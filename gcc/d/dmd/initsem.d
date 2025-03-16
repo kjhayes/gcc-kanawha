@@ -439,7 +439,7 @@ Initializer initializerSemantic(Initializer init, Scope* sc, ref Type tx, NeedIn
             Type typeb = se.type.toBasetype();
             TY tynto = tb.nextOf().ty;
             if (!se.committed &&
-                (typeb.ty == Tarray || typeb.ty == Tsarray) && tynto.isSomeChar &&
+                typeb.isStaticOrDynamicArray() && tynto.isSomeChar &&
                 se.numberOfCodeUnits(tynto) < tb.isTypeSArray().dim.toInteger())
             {
                 i.exp = se.castTo(sc, t);
@@ -489,7 +489,7 @@ Initializer initializerSemantic(Initializer init, Scope* sc, ref Type tx, NeedIn
                 else
                     i.exp = e.optimize(WANTvalue);
             }
-            else if (search_function(sd, Id.call))
+            else if (search_function(sd, Id.opCall))
             {
                 /* https://issues.dlang.org/show_bug.cgi?id=1547
                  *
@@ -499,7 +499,7 @@ Initializer initializerSemantic(Initializer init, Scope* sc, ref Type tx, NeedIn
                  *  i.exp = typeof(sd).opCall(arguments)
                  */
 
-                Expression e = typeDotIdExp(i.loc, sd.type, Id.call);
+                Expression e = typeDotIdExp(i.loc, sd.type, Id.opCall);
                 e = new CallExp(i.loc, e, i.exp);
                 e = e.expressionSemantic(sc);
                 e = resolveProperties(sc, e);

@@ -3870,7 +3870,11 @@ cp_build_indirect_ref_1 (location_t loc, tree ptr, ref_operator errorstring,
 	  return error_mark_node;
 	}
       else if (do_fold && TREE_CODE (pointer) == ADDR_EXPR
-	       && same_type_p (t, TREE_TYPE (TREE_OPERAND (pointer, 0))))
+	       && same_type_p (t, TREE_TYPE (TREE_OPERAND (pointer, 0)))
+	       /* Don't let this change the value category.  '*&TARGET_EXPR'
+		  is an lvalue, but folding it into 'TARGET_EXPR' would turn
+		  it into a prvalue of class type.  */
+	       && lvalue_p (TREE_OPERAND (pointer, 0)))
 	/* The POINTER was something like `&x'.  We simplify `*&x' to
 	   `x'.  */
 	return TREE_OPERAND (pointer, 0);
@@ -4219,16 +4223,14 @@ get_member_function_from_ptrfunc (tree *instance_ptrptr, tree function,
 	      && !DECL_P (instance_ptr)
 	      && !TREE_CONSTANT (instance_ptr)))
 	instance_ptr = instance_save_expr
-	  = force_target_expr (TREE_TYPE (instance_ptr), instance_ptr,
-			       complain);
+	  = get_internal_target_expr (instance_ptr);
 
       /* See above comment.  */
       if (TREE_SIDE_EFFECTS (function)
 	  || (!nonvirtual
 	      && !DECL_P (function)
 	      && !TREE_CONSTANT (function)))
-	function
-	  = force_target_expr (TREE_TYPE (function), function, complain);
+	function = get_internal_target_expr (function);
 
       /* Start by extracting all the information from the PMF itself.  */
       e3 = pfn_from_ptrmemfunc (function);
@@ -11452,7 +11454,7 @@ check_return_expr (tree retval, bool *no_warning, bool *dangling)
       bool converted = false;
       tree moved;
       /* Until C++23, this was only interesting for class type, but in C++23,
-	 we should do the below when we're converting rom/to a class/reference
+	 we should do the below when we're converting from/to a class/reference
 	 (a non-scalar type).  */
 	if ((cxx_dialect < cxx23
 	     ? CLASS_TYPE_P (functype)

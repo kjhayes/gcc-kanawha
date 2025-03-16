@@ -366,6 +366,10 @@ static vn_ssa_aux_t last_pushed_avail;
    correct.  */
 static vn_tables_t valid_info;
 
+/* Global RPO state for access from hooks.  */
+static class eliminate_dom_walker *rpo_avail;
+basic_block vn_context_bb;
+
 
 /* Valueization hook for simplify_replace_tree.  Valueize NAME if it is
    an SSA name, otherwise just return it.  */
@@ -2501,7 +2505,10 @@ vn_nary_build_or_lookup_1 (gimple_match_op *res_op, bool insert,
   bool res = false;
   if (i == res_op->num_ops)
     {
-      mprts_hook = vn_lookup_simplify_result;
+      /* Do not leak not available operands into the simplified expression
+	 when called from PRE context.  */
+      if (rpo_avail)
+	mprts_hook = vn_lookup_simplify_result;
       res = res_op->resimplify (NULL, vn_valueize);
       mprts_hook = NULL;
     }
@@ -2683,10 +2690,6 @@ public:
      obstack.  */
   vn_avail *m_avail_freelist;
 };
-
-/* Global RPO state for access from hooks.  */
-static eliminate_dom_walker *rpo_avail;
-basic_block vn_context_bb;
 
 /* Return true if BASE1 and BASE2 can be adjusted so they have the
    same address and adjust *OFFSET1 and *OFFSET2 accordingly.
@@ -5166,6 +5169,34 @@ dominated_by_p_w_unex (basic_block bb1, basic_block bb2, bool allow_back)
 	    }
 	}
     }
+  /* Iterate to the single successor of bb2 with only a single executable
+     incoming edge.  */
+  else if (EDGE_COUNT (bb2->succs) == 1
+	   && EDGE_COUNT (single_succ (bb2)->preds) > 1)
+    {
+      edge prede = NULL;
+      FOR_EACH_EDGE (e, ei, single_succ (bb2)->preds)
+	if ((e->flags & EDGE_EXECUTABLE)
+	    || (!allow_back && (e->flags & EDGE_DFS_BACK)))
+	  {
+	    if (prede)
+	      {
+		prede = NULL;
+		break;
+	      }
+	    prede = e;
+	  }
+      /* We might actually get to a query with BB2 not visited yet when
+	 we're querying for a predicated value.  */
+      if (prede && prede->src == bb2)
+	{
+	  bb2 = prede->dest;
+
+	  /* Re-do the dominance check with changed bb2.  */
+	  if (dominated_by_p (CDI_DOMINATORS, bb1, bb2))
+	    return true;
+	}
+    }
 
   /* We could now iterate updating bb1 / bb2.  */
   return false;
@@ -7078,6 +7109,8 @@ eliminate_dom_walker::eliminate_stmt (basic_block b, gimple_stmt_iterator *gsi)
   if (gimple_assign_single_p (stmt)
       && !gimple_has_volatile_ops (stmt)
       && !is_gimple_reg (gimple_assign_lhs (stmt))
+      && (TREE_CODE (gimple_assign_lhs (stmt)) != VAR_DECL
+	  || !DECL_HARD_REGISTER (gimple_assign_lhs (stmt)))
       && (TREE_CODE (gimple_assign_rhs1 (stmt)) == SSA_NAME
 	  || is_gimple_min_invariant (gimple_assign_rhs1 (stmt))))
     {

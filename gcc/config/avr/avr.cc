@@ -2750,10 +2750,19 @@ avr_print_operand (FILE *file, rtx x, int code)
 		  fprintf (file, HOST_WIDE_INT_PRINT_HEX, ival - sfr0);
 	      }
 	    else
-	      output_operand_lossage
-		("bad I/O address 0x" HOST_WIDE_INT_PRINT_HEX_PURE
-		 " outside of valid range [0x%x, 0x%x] for %%i operand",
-		 ival, sfr0, sfr0 + 0x3f);
+	      {
+		char buf[17];
+		/* Printed indirectly through buffer, as
+		   output_operand_lossage is translatable but uses printf
+		   format strings, so HOST_WIDE_INT_PRINT_HEX_PURE macro can't
+		   be used there to make translation possible and how exactly
+		   can be HOST_WIDE_INT printed is host dependent.  */
+		snprintf (buf, sizeof buf, HOST_WIDE_INT_PRINT_HEX_PURE,
+			  ival);
+		output_operand_lossage ("bad I/O address 0x%s outside of "
+					"valid range [0x%x, 0x%x] for %%i "
+					"operand", buf, sfr0, sfr0 + 0x3f);
+	      }
 	  }
 	  break; // CONST_INT
 
@@ -3503,6 +3512,25 @@ reg_unused_after (rtx_insn *insn, rtx reg)
 {
   return (dead_or_set_p (insn, reg)
 	  || (REG_P (reg) && _reg_unused_after (insn, reg, true)));
+}
+
+
+/* Return true when REGNO is set by INSN but not used by the following code.
+   The difference to reg_unused_after() is that reg_unused_after() returns
+   true for the entire result even when the result *IS* being used atfer.  */
+
+static bool
+avr_result_regno_unused_p (rtx_insn *insn, unsigned regno)
+{
+  if (!insn || !single_set (insn) || regno >= REG_32)
+    return false;
+
+  rtx dest = SET_DEST (single_set (insn));
+  if (!REG_P (dest) || !IN_RANGE (regno, REGNO (dest), END_REGNO (dest) - 1))
+    return false;
+
+  return (avr_insn_has_reg_unused_note_p (insn, all_regs_rtx[regno])
+	  || _reg_unused_after (insn, all_regs_rtx[regno], false));
 }
 
 
@@ -8720,7 +8748,7 @@ avr_out_add_msb (rtx_insn *insn, rtx *yop, rtx_code cmp, int *plen)
 
 
 /* Output addition of register XOP[0] and compile time constant XOP[2].
-   INSN is a single_set insn or an insn pattern.
+   XINSN is a single_set insn or an insn pattern.
    CODE == PLUS:  perform addition by using ADD instructions or
    CODE == MINUS: perform addition by using SUB instructions:
 
@@ -8746,9 +8774,13 @@ avr_out_add_msb (rtx_insn *insn, rtx *yop, rtx_code cmp, int *plen)
    fixed-point rounding, cf. `avr_out_round'.  */
 
 static void
-avr_out_plus_1 (rtx insn, rtx *xop, int *plen, rtx_code code,
+avr_out_plus_1 (rtx xinsn, rtx *xop, int *plen, rtx_code code,
 		rtx_code code_sat, int sign, bool out_label)
 {
+  rtx_insn *insn = xinsn && INSN_P (xinsn)
+    ? as_a <rtx_insn *> (xinsn)
+    : nullptr;
+
   /* MODE of the operation.  */
   machine_mode mode = GET_MODE (xop[0]);
 
@@ -8757,6 +8789,11 @@ avr_out_plus_1 (rtx insn, rtx *xop, int *plen, rtx_code code,
 
   /* Number of bytes to operate on.  */
   int n_bytes = GET_MODE_SIZE (mode);
+
+  int regno0 = REGNO (xop[0]);
+  if (optimize && code_sat == UNKNOWN)
+    while (n_bytes && avr_result_regno_unused_p (insn, regno0 + n_bytes - 1))
+      n_bytes -= 1;
 
   /* Value (0..0xff) held in clobber register op[3] or -1 if unknown.  */
   int clobber_val = -1;
@@ -8782,14 +8819,16 @@ avr_out_plus_1 (rtx insn, rtx *xop, int *plen, rtx_code code,
 
   if (REG_P (xop[2]))
     {
-      if (REGNO (xop[0]) != REGNO (xop[2])
+      if (optimize
+	  && REGNO (xop[0]) != REGNO (xop[2])
 	  && reg_overlap_mentioned_p (xop[0], xop[2]))
 	{
 	  /* PR118878: Paradoxical SUBREGs may result in overlapping
 	     registers.  The assumption is that the overlapping part
 	     is unused garbage.  */
 	  gcc_assert (n_bytes <= 4);
-	  n_bytes = std::abs ((int) REGNO (xop[0]) - (int) REGNO (xop[2]));
+	  int delta = (int) REGNO (xop[0]) - (int) REGNO (xop[2]);
+	  n_bytes = std::min (n_bytes, std::abs (delta));
 	}
 
       for (int i = 0; i < n_bytes; i++)
@@ -8898,8 +8937,8 @@ avr_out_plus_1 (rtx insn, rtx *xop, int *plen, rtx_code code,
 	  && frame_pointer_needed
 	  && REGNO (xop[0]) == FRAME_POINTER_REGNUM)
 	{
-	  if (INSN_P (insn)
-	      && _reg_unused_after (as_a <rtx_insn *> (insn), xop[0], false))
+	  if (insn
+	      && _reg_unused_after (insn, xop[0], false))
 	    return;
 
 	  if (AVR_HAVE_8BIT_SP)
@@ -8994,7 +9033,7 @@ avr_out_plus_1 (rtx insn, rtx *xop, int *plen, rtx_code code,
      We have to compute  A = A <op> B  where  A  is a register and
      B is a register or a non-zero compile time constant CONST.
      A is register class "r" if unsigned && B is REG.  Otherwise, A is in "d".
-     B stands for the original operand $2 in INSN.  In the case of B = CONST,
+     B stands for the original operand $2 in XINSN.  In the case of B = CONST,
      SIGN in { -1, 1 } is the sign of B.  Otherwise, SIGN is 0.
 
      CODE is the instruction flavor we use in the asm sequence to perform <op>.
@@ -9624,13 +9663,17 @@ avr_len_op8_set_ZN (rtx_code code, rtx *xop)
    operation; otherwise, set *PLEN to the length of the instruction sequence
    (in words) printed with PLEN == NULL.  XOP[3] is either an 8-bit clobber
    register or SCRATCH if no clobber register is needed for the operation.
-   INSN is an INSN_P or a pattern of an insn.  */
+   XINSN is an INSN_P or a pattern of an insn.  */
 
 const char *
-avr_out_bitop (rtx insn, rtx *xop, int *plen)
+avr_out_bitop (rtx xinsn, rtx *xop, int *plen)
 {
+  rtx_insn *insn = xinsn && INSN_P (xinsn)
+    ? as_a <rtx_insn *> (xinsn)
+    : nullptr;
+  rtx xpattern = insn ? single_set (insn) : xinsn;
+
   /* CODE and MODE of the operation.  */
-  rtx xpattern = INSN_P (insn) ? single_set (as_a <rtx_insn *> (insn)) : insn;
   rtx_code code = GET_CODE (SET_SRC (xpattern));
   machine_mode mode = GET_MODE (xop[0]);
 
@@ -9659,6 +9702,10 @@ avr_out_bitop (rtx insn, rtx *xop, int *plen)
     {
       /* We operate byte-wise on the destination.  */
       rtx reg8 = avr_byte (xop[0], i);
+
+      if (optimize
+	  && avr_result_regno_unused_p (insn, REGNO (reg8)))
+	continue;
 
       /* 8-bit value to operate with this byte. */
       unsigned int val8 = avr_uint8 (xop[2], i);
@@ -15751,27 +15798,6 @@ avr_bdesc[AVR_BUILTIN_COUNT] =
   };
 
 
-/* Some of our built-in function are available for GNU-C only:
-   - Built-ins that use named address-spaces.
-   - Built-ins that use fixed-point types.  */
-
-bool
-avr_builtin_supported_p (unsigned id)
-{
-  const bool uses_as = (id == AVR_BUILTIN_FLASH_SEGMENT
-			|| id == AVR_BUILTIN_STRLEN_FLASH
-			|| id == AVR_BUILTIN_STRLEN_FLASHX
-			|| id == AVR_BUILTIN_STRLEN_MEMX);
-
-  // We don't support address-spaces on Reduced Tiny.
-  if (AVR_TINY && uses_as)
-    return false;
-
-  return (lang_GNU_C ()
-	  || id < AVR_FIRST_C_ONLY_BUILTIN_ID);
-}
-
-
 /* Implement `TARGET_BUILTIN_DECL'.  */
 
 static tree
@@ -15997,10 +16023,9 @@ avr_init_builtins (void)
     char *name = (char *) alloca (1 + strlen (Name));			\
 									\
     gcc_assert (id < AVR_BUILTIN_COUNT);				\
-    avr_bdesc[id].fndecl = avr_builtin_supported_p (id)			\
-      ? add_builtin_function (avr_tolower (name, Name), TYPE, id,	\
-			      BUILT_IN_MD, LIBNAME, ATTRS)		\
-      : NULL_TREE;							\
+    avr_bdesc[id].fndecl						\
+      = add_builtin_function (avr_tolower (name, Name), TYPE, id,	\
+			      BUILT_IN_MD, LIBNAME, ATTRS);		\
   }
 #include "builtins.def"
 #undef DEF_BUILTIN

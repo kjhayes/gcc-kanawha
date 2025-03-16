@@ -1,5 +1,5 @@
 /* { dg-do compile } */
-/* { dg-options "-march=x86-64-v3 -mavx10.2 -O2" } */
+/* { dg-options "-march=x86-64-v3 -mavx10.2-256 -O2" } */
 /* { dg-final { scan-assembler-times "vcvt2ps2phx\[ \\t\]+\[^\{\n\]*%xmm\[0-9\]+\[^\n\r]*%xmm\[0-9\]+\[^\n\r]*%xmm\[0-9\]+(?:\n|\[ \\t\]+#)" 1 } } */
 /* { dg-final { scan-assembler-times "vcvt2ps2phx\[ \\t\]+\[^\{\n\]*%xmm\[0-9\]+\[^\n\r]*%xmm\[0-9\]+\[^\n\r]*%xmm\[0-9\]+\{%k\[0-9\]\}(?:\n|\[ \\t\]+#)" 1 } } */
 /* { dg-final { scan-assembler-times "vcvt2ps2phx\[ \\t\]+\[^\{\n\]*%xmm\[0-9\]+\[^\n\r]*%xmm\[0-9\]+\[^\n\r]*%xmm\[0-9\]+\{%k\[0-9\]\}\{z\}\[^\n\r]*(?:\n|\[ \\t\]+#)" 1 } } */
@@ -289,6 +289,6 @@ avx10_2_cvtbf8_fp16_test (void)
   y = _mm_maskz_cvtbf8_ph (m8, z3);
 
   y2 = _mm256_cvtbf8_ph (z3);
-  y2 = _mm256_mask_cvtbf8_ph (z2, m8, z3);
-  y2 = _mm256_maskz_cvtbf8_ph (m8, z3);
+  y2 = _mm256_mask_cvtbf8_ph (z2, m16, z3);
+  y2 = _mm256_maskz_cvtbf8_ph (m16, z3);
 }

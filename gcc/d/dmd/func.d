@@ -277,7 +277,7 @@ extern (C++) class FuncDeclaration : Declaration
     /// Sibling nested functions which called this one
     FuncDeclarations siblingCallers;
 
-    FuncDeclarations *inlinedNestedCallees;
+    FuncDeclarations* inlinedNestedCallees;
 
     /// In case of failed `@safe` inference, store the error that made the function `@system` for
     /// better diagnostics
@@ -581,8 +581,7 @@ extern (C++) class FuncDeclaration : Declaration
     {
         if (isMain())
             return "D main";
-        else
-            return Dsymbol.toPrettyChars(QualifyTypes);
+        return Dsymbol.toPrettyChars(QualifyTypes);
     }
 
     /** for diagnostics, e.g. 'int foo(int x, int y) pure' */
@@ -1391,11 +1390,6 @@ extern (C++) final class CtorDeclaration : FuncDeclaration
         return isCpCtor ? "copy constructor" : "constructor";
     }
 
-    override const(char)* toChars() const
-    {
-        return "this";
-    }
-
     override bool isVirtual() const
     {
         return false;
@@ -1495,11 +1489,6 @@ extern (C++) final class DtorDeclaration : FuncDeclaration
     override const(char)* kind() const
     {
         return "destructor";
-    }
-
-    override const(char)* toChars() const
-    {
-        return "~this";
     }
 
     override bool isVirtual() const

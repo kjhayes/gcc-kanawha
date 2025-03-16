@@ -514,6 +514,7 @@ extern GTY(()) tree cp_global_trees[CPTI_MAX];
       OVL_LOOKUP_P (in OVERLOAD)
       LOOKUP_FOUND_P (in RECORD_TYPE, UNION_TYPE, ENUMERAL_TYPE, NAMESPACE_DECL)
       FNDECL_MANIFESTLY_CONST_EVALUATED (in FUNCTION_DECL)
+      TARGET_EXPR_INTERNAL_P (in TARGET_EXPR)
    5: IDENTIFIER_VIRTUAL_P (in IDENTIFIER_NODE)
       FUNCTION_RVALUE_QUALIFIED (in FUNCTION_TYPE, METHOD_TYPE)
       CALL_EXPR_REVERSE_ARGS (in CALL_EXPR, AGGR_INIT_EXPR)
@@ -2024,7 +2025,7 @@ extern GTY(()) struct saved_scope *scope_chain;
 #define processing_omp_trait_property_expr scope_chain->x_processing_omp_trait_property_expr
 
 /* Nonzero if we are parsing the conditional expression of a contract
-   condition. These expressions appear outside the paramter list (like a
+   condition. These expressions appear outside the parameter list (like a
    trailing return type), but are potentially evaluated.  */
 
 #define processing_contract_condition scope_chain->x_processing_contract_condition
@@ -5608,6 +5609,11 @@ decl_template_parm_check (const_tree t, const char *f, int l, const char *fn)
 #define TARGET_EXPR_ELIDING_P(NODE) \
   TREE_LANG_FLAG_3 (TARGET_EXPR_CHECK (NODE))
 
+/* True if this TARGET_EXPR is for holding an implementation detail like a
+   cleanup flag or loop index, and should be ignored by extend_all_temps.  */
+#define TARGET_EXPR_INTERNAL_P(NODE) \
+  TREE_LANG_FLAG_4 (TARGET_EXPR_CHECK (NODE))
+
 /* True if NODE is a TARGET_EXPR that just expresses a copy of its INITIAL; if
    the initializer has void type, it's doing something more complicated.  */
 #define SIMPLE_TARGET_EXPR_P(NODE)				\
@@ -7195,7 +7201,7 @@ extern int wrapup_namespace_globals		();
 extern tree create_implicit_typedef		(tree, tree);
 extern int local_variable_p			(const_tree);
 extern tree get_cxa_atexit_fn_ptr_type		();
-extern tree register_dtor_fn			(tree);
+extern tree register_dtor_fn			(tree, bool = false);
 extern tmpl_spec_kind current_tmpl_spec_kind	(int);
 extern tree cxx_builtin_function		(tree decl);
 extern tree cxx_builtin_function_ext_scope	(tree decl);
@@ -8108,6 +8114,7 @@ extern void insert_capture_proxy		(tree);
 extern void insert_pending_capture_proxies	(void);
 extern bool is_capture_proxy			(tree);
 extern bool is_normal_capture_proxy             (tree);
+extern tree strip_normal_capture_proxy		(tree);
 extern bool is_constant_capture_proxy           (tree);
 extern void register_capture_members		(tree);
 extern tree lambda_expr_this_capture            (tree, int);
@@ -8615,6 +8622,7 @@ extern tree mangle_decomp			(tree, vec<tree> &);
 extern void mangle_module_substitution		(int);
 extern int mangle_module_component		(tree id, bool partition);
 extern tree mangle_module_global_init		(int);
+extern unsigned HOST_WIDE_INT range_expr_nelts	(tree);
 
 /* in dump.cc */
 extern bool cp_dump_tree			(void *, tree);

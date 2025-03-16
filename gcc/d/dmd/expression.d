@@ -301,8 +301,14 @@ extern (C++) abstract class Expression : ASTNode
 
     Loc loc;        // file location
     const EXP op;   // to minimize use of dynamic_cast
-    bool parens;    // if this is a parenthesized expression
-    bool rvalue;    // true if this is considered to be an rvalue, even if it is an lvalue
+
+    static struct BitFields
+    {
+        bool parens;    // if this is a parenthesized expression
+        bool rvalue;    // true if this is considered to be an rvalue, even if it is an lvalue
+    }
+    import dmd.common.bitfields;
+    mixin(generateBitFields!(BitFields, ubyte));
 
     extern (D) this(const ref Loc loc, EXP op) scope @safe
     {
@@ -375,8 +381,13 @@ extern (C++) abstract class Expression : ASTNode
         return DYNCAST.expression;
     }
 
-    override const(char)* toChars() const
+    final override const(char)* toChars() const
     {
+        // FIXME: Test suite relies on lambda's being printed as __lambdaXXX in errors and .stringof
+        // Printing a (truncated) lambda body is more user friendly
+        if (auto fe = isFuncExp())
+            return fe.fd.toChars();
+
         return .toChars(this);
     }
 
@@ -514,117 +525,6 @@ extern (C++) abstract class Expression : ASTNode
     bool checkType()
     {
         return false;
-    }
-
-    /****************************************
-     * Check that the expression has a valid value.
-     * If not, generates an error "... has no value".
-     * Returns:
-     *      true if the expression is not valid or has void type.
-     */
-    bool checkValue()
-    {
-        if (type && type.toBasetype().ty == Tvoid)
-        {
-            error(loc, "expression `%s` is `void` and has no value", toChars());
-            //print(); assert(0);
-            if (!global.gag)
-                type = Type.terror;
-            return true;
-        }
-        return false;
-    }
-
-    extern (D) final bool checkScalar()
-    {
-        if (op == EXP.error)
-            return true;
-        if (type.toBasetype().ty == Terror)
-            return true;
-        if (!type.isScalar())
-        {
-            error(loc, "`%s` is not a scalar, it is a `%s`", toChars(), type.toChars());
-            return true;
-        }
-        return checkValue();
-    }
-
-    extern (D) final bool checkNoBool()
-    {
-        if (op == EXP.error)
-            return true;
-        if (type.toBasetype().ty == Terror)
-            return true;
-        if (type.toBasetype().ty == Tbool)
-        {
-            error(loc, "operation not allowed on `bool` `%s`", toChars());
-            return true;
-        }
-        return false;
-    }
-
-    extern (D) final bool checkIntegral()
-    {
-        if (op == EXP.error)
-            return true;
-        if (type.toBasetype().ty == Terror)
-            return true;
-        if (!type.isIntegral())
-        {
-            error(loc, "`%s` is not of integral type, it is a `%s`", toChars(), type.toChars());
-            return true;
-        }
-        return checkValue();
-    }
-
-    extern (D) final bool checkArithmetic(EXP op)
-    {
-        if (op == EXP.error)
-            return true;
-        if (type.toBasetype().ty == Terror)
-            return true;
-        if (!type.isIntegral() && !type.isFloating())
-        {
-            // unary aggregate ops error here
-            const char* msg = type.isAggregate() ?
-                "operator `%s` is not defined for `%s` of type `%s`" :
-                "illegal operator `%s` for `%s` of type `%s`";
-            error(loc, msg, EXPtoString(op).ptr, toChars(), type.toChars());
-            return true;
-        }
-        return checkValue();
-    }
-
-    /*******************************
-     * Check whether the expression allows RMW operations, error with rmw operator diagnostic if not.
-     * ex is the RHS expression, or NULL if ++/-- is used (for diagnostics)
-     * Returns true if error occurs.
-     */
-    extern (D) final bool checkReadModifyWrite(EXP rmwOp, Expression ex = null)
-    {
-        //printf("Expression::checkReadModifyWrite() %s %s", toChars(), ex ? ex.toChars() : "");
-        if (!type || !type.isShared() || type.isTypeStruct() || type.isTypeClass())
-            return false;
-
-        // atomicOp uses opAssign (+=/-=) rather than opOp (++/--) for the CT string literal.
-        switch (rmwOp)
-        {
-        case EXP.plusPlus:
-        case EXP.prePlusPlus:
-            rmwOp = EXP.addAssign;
-            break;
-        case EXP.minusMinus:
-        case EXP.preMinusMinus:
-            rmwOp = EXP.minAssign;
-            break;
-        default:
-            break;
-        }
-
-        error(loc, "read-modify-write operations are not allowed for `shared` variables");
-        errorSupplemental(loc, "Use `core.atomic.atomicOp!\"%s\"(%s, %s)` instead",
-                          EXPtoString(rmwOp).ptr, toChars(), ex ? ex.toChars() : "1");
-        return true;
     }
 
     /******************************
@@ -2218,6 +2118,16 @@ extern (C++) final class AssocArrayLiteralExp : Expression
  */
 extern (C++) final class StructLiteralExp : Expression
 {
+    struct BitFields
+    {
+        bool useStaticInit;     /// if this is true, use the StructDeclaration's init symbol
+        bool isOriginal = false; /// used when moving instances to indicate `this is this.origin`
+        OwnedBy ownedByCtfe = OwnedBy.code;
+    }
+    import dmd.common.bitfields;
+    mixin(generateBitFields!(BitFields, ubyte));
+    StageFlags stageflags;
+
     StructDeclaration sd;   /// which aggregate this is for
     Expressions* elements;  /// parallels sd.fields[] with null entries for fields to skip
     Type stype;             /// final type of result (can be different from sd's type)
@@ -2255,11 +2165,6 @@ extern (C++) final class StructLiteralExp : Expression
         inlineScan        = 0x10, /// inlineScan is running
         toCBuffer         = 0x20 /// toCBuffer is running
     }
-    StageFlags stageflags;
-
-    bool useStaticInit;     /// if this is true, use the StructDeclaration's init symbol
-    bool isOriginal = false; /// used when moving instances to indicate `this is this.origin`
-    OwnedBy ownedByCtfe = OwnedBy.code;
 
     extern (D) this(const ref Loc loc, StructDeclaration sd, Expressions* elements, Type stype = null) @safe
     {
@@ -2441,12 +2346,6 @@ extern (C++) final class TypeExp : Expression
         return true;
     }
 
-    override bool checkValue()
-    {
-        error(loc, "type `%s` has no value", toChars());
-        return true;
-    }
-
     override void accept(Visitor v)
     {
         v.visit(this);
@@ -2500,12 +2399,6 @@ extern (C++) final class ScopeExp : Expression
         return false;
     }
 
-    override bool checkValue()
-    {
-        error(loc, "%s `%s` has no value", sds.kind(), sds.toChars());
-        return true;
-    }
-
     override void accept(Visitor v)
     {
         v.visit(this);
@@ -2536,12 +2429,6 @@ extern (C++) final class TemplateExp : Expression
     override bool checkType()
     {
         error(loc, "%s `%s` has no type", td.kind(), toChars());
-        return true;
-    }
-
-    override bool checkValue()
-    {
-        error(loc, "%s `%s` has no value", td.kind(), toChars());
         return true;
     }
 
@@ -2812,26 +2699,11 @@ extern (C++) final class FuncExp : Expression
         return new FuncExp(loc, fd);
     }
 
-    override const(char)* toChars() const
-    {
-        return fd.toChars();
-    }
-
     override bool checkType()
     {
         if (td)
         {
             error(loc, "template lambda has no type");
-            return true;
-        }
-        return false;
-    }
-
-    override bool checkValue()
-    {
-        if (td)
-        {
-            error(loc, "template lambda has no value");
             return true;
         }
         return false;
@@ -3039,8 +2911,6 @@ extern (C++) abstract class BinExp : Expression
 {
     Expression e1;
     Expression e2;
-    Type att1;      // Save alias this type to detect recursion
-    Type att2;      // Save alias this type to detect recursion
 
     extern (D) this(const ref Loc loc, EXP op, Expression e1, Expression e2) scope @safe
     {
@@ -3056,20 +2926,6 @@ extern (C++) abstract class BinExp : Expression
         e.e1 = e.e1.syntaxCopy();
         e.e2 = e.e2.syntaxCopy();
         return e;
-    }
-
-    extern (D) final bool checkIntegralBin()
-    {
-        bool r1 = e1.checkIntegral();
-        bool r2 = e2.checkIntegral();
-        return (r1 || r2);
-    }
-
-    extern (D) final bool checkArithmeticBin()
-    {
-        bool r1 = e1.checkArithmetic(this.op);
-        bool r2 = e2.checkArithmetic(this.op);
-        return (r1 || r2);
     }
 
     /*********************
@@ -3276,12 +3132,6 @@ extern (C++) final class DotTemplateExp : UnaExp
         return true;
     }
 
-    override bool checkValue()
-    {
-        error(loc, "%s `%s` has no value", td.kind(), toChars());
-        return true;
-    }
-
     override void accept(Visitor v)
     {
         v.visit(this);
@@ -3358,18 +3208,6 @@ extern (C++) final class DotTemplateInstanceExp : UnaExp
             return true;
         }
         return false;
-    }
-
-    override bool checkValue()
-    {
-        if (ti.tempdecl &&
-            ti.semantictiargsdone &&
-            ti.semanticRun == PASS.initial)
-
-            error(loc, "partial %s `%s` has no value", ti.kind(), toChars());
-        else
-            error(loc, "%s `%s` has no value", ti.kind(), ti.toChars());
-        return true;
     }
 
     override void accept(Visitor v)
@@ -4288,10 +4126,6 @@ extern (C++) final class LoweredAssignExp : AssignExp
         this.lowering = lowering;
     }
 
-    override const(char)* toChars() const
-    {
-        return lowering.toChars();
-    }
     override void accept(Visitor v)
     {
         v.visit(this);
@@ -5197,27 +5031,6 @@ extern (C++) final class CTFEExp : Expression
         type = Type.tvoid;
     }
 
-    override const(char)* toChars() const
-    {
-        switch (op)
-        {
-        case EXP.cantExpression:
-            return "<cant>";
-        case EXP.voidExpression:
-            return "cast(void)0";
-        case EXP.showCtfeContext:
-            return "<error>";
-        case EXP.break_:
-            return "<break>";
-        case EXP.continue_:
-            return "<continue>";
-        case EXP.goto_:
-            return "<goto>";
-        default:
-            assert(0);
-        }
-    }
-
     extern (D) __gshared CTFEExp cantexp;
     extern (D) __gshared CTFEExp voidexp;
     extern (D) __gshared CTFEExp breakexp;
@@ -5252,11 +5065,6 @@ extern (C++) final class ThrownExceptionExp : Expression
         super(loc, EXP.thrownException);
         this.thrown = victim;
         this.type = victim.type;
-    }
-
-    override const(char)* toChars() const
-    {
-        return "CTFE ThrownException";
     }
 
     override void accept(Visitor v)
