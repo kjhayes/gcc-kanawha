@@ -1197,6 +1197,9 @@ case ${target} in
 x86_64-*-kanawha*)
 	tm_file="${tm_file} i386/unix.h i386/att.h elfos.h glibc-stdint.h i386/i386elf.h i386/x86-64.h kanawha.h"
     ;;
+riscv*-*-kanawha*)
+	tm_file="elfos.h gnu-user.h glibc-stdint.h ${tm_file}"
+    ;;
 aarch64*-*-elf | aarch64*-*-fuchsia* | aarch64*-*-rtems*)
 	tm_file="${tm_file} elfos.h newlib-stdint.h"
 	tm_file="${tm_file} aarch64/aarch64-elf.h aarch64/aarch64-errata.h aarch64/aarch64-elf-raw.h"
